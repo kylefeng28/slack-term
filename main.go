@@ -48,6 +48,12 @@ type model struct {
 	pendingMessages string
 }
 
+func debugPrintf(format string, args ...any) {
+	if flgDebug {
+		fmt.Printf(format, args...)
+	}
+}
+
 func initialModel() (model, error) {
 	cfg, err := config.NewConfig(flgConfig)
 	if err != nil {
@@ -87,6 +93,16 @@ func (m model) Init() tea.Cmd {
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+
+	// Debug logging
+	if m.ctx.Debug {
+		switch msg.(type) {
+		case tea.KeyMsg, tea.WindowSizeMsg:
+			// Skip noisy messages
+		default:
+			debugPrintf("Update received: %T %+v", msg, msg)
+		}
+	}
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -157,24 +173,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case channelsLoadedMsg:
-		items := make([]components.ChannelItem, len(msg.channels))
-		for i, ch := range msg.channels {
-			items[i] = components.ChannelItem{
-				ID:   ch.ID,
-				Name: ch.Name,
-			}
-		}
+		debugPrintf("channelsLoadedMsg: Received %d channels, ready=%v", len(msg.channels), m.ready)
 		if m.ready {
-			m.channels.SetChannels(items)
+			m.channels.SetChannels(msg.channels)
+			debugPrintf("channelsLoadedMsg: Set channels on component")
 		} else {
-			m.pendingChannels = items
+			m.pendingChannels = msg.channels
+			debugPrintf("channelsLoadedMsg: Buffered channels (not ready yet)")
 		}
 
 	case messagesLoadedMsg:
+		debugPrintf("messagesLoadedMsg: Received messages, ready=%v, content length=%d", m.ready, len(msg.content))
 		if m.ready {
 			m.chat.SetMessages(msg.content)
+			debugPrintf("messagesLoadedMsg: Set messages on component")
 		} else {
 			m.pendingMessages = msg.content
+			debugPrintf("messagesLoadedMsg: Buffered messages (not ready yet)")
 		}
 
 	case errMsg:
@@ -218,7 +233,7 @@ func (m model) View() string {
 
 // Messages
 type channelsLoadedMsg struct {
-	channels []channelData
+	channels []components.ChannelItem
 }
 
 type messagesLoadedMsg struct {
@@ -229,32 +244,32 @@ type errMsg struct {
 	err error
 }
 
-type channelData struct {
-	ID   string
-	Name string
-}
-
 // Commands
 func loadChannelsCmd(ctx *context.AppContext) tea.Cmd {
 	return func() tea.Msg {
-		channels := []channelData{}
-		for _, ch := range ctx.Service.Conversations {
-			channels = append(channels, channelData{
-				ID:   ch.ID,
-				Name: ch.Name,
-			})
+		debugPrintf("loadChannelsCmd: Starting to load channels")
+		channels, err := ctx.Service.GetChannels()
+		if err != nil {
+			debugPrintf("loadChannelsCmd: Error: %v", err)
+			return errMsg{err: err}
 		}
+		debugPrintf("loadChannelsCmd: Loaded %d channels", len(channels))
 		return channelsLoadedMsg{channels: channels}
 	}
 }
 
 func loadMessagesCmd(ctx *context.AppContext, channelID string) tea.Cmd {
 	return func() tea.Msg {
+		debugPrintf("loadMessagesCmd: Loading messages for channel %s", channelID)
+		
 		messages, _, err := ctx.Service.GetMessages(channelID, 100)
 		if err != nil {
+			debugPrintf("loadMessagesCmd: Error loading messages: %v", err)
 			return errMsg{err: err}
 		}
 
+		debugPrintf("loadMessagesCmd: Loaded %d messages", len(messages))
+		
 		content := ""
 		for i := len(messages) - 1; i >= 0; i-- {
 			msg := messages[i]
@@ -269,6 +284,16 @@ func loadMessagesCmd(ctx *context.AppContext, channelID string) tea.Cmd {
 }
 
 func main() {
+	// Setup debug logging
+	if flgDebug {
+		f, err := tea.LogToFile("debug.log", "debug")
+		if err != nil {
+			fmt.Println("fatal:", err)
+			os.Exit(1)
+		}
+		defer f.Close()
+	}
+
 	m, err := initialModel()
 	if err != nil {
 		log.Fatal(err)

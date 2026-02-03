@@ -29,6 +29,7 @@ type Config struct {
 	ThreadsWidth int                   `json:"threads_width"`
 	KeyMap       map[string]keyMapping `json:"key_map"`
 	Theme        Theme                 `json:"theme"`
+	IsEnterprise bool                  `json:"is_enterprise"`
 }
 
 type keyMapping map[string]string

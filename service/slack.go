@@ -80,41 +80,106 @@ func NewSlackService(config *config.Config) (*SlackService, error) {
 
 	// Creation of user cache this speeds up
 	// the uncovering of usernames of messages
-	users, _ := svc.Client.GetUsers()
-	for _, user := range users {
-		// only add non-deleted users
-		if !user.Deleted {
-			svc.UserCache[user.ID] = user.Name
+	// Note: this is will hit rate limits on Slack orgs with a large number of users
+	if !config.IsEnterprise {
+		users, _ := svc.Client.GetUsers()
+		for _, user := range users {
+			// only add non-deleted users
+			if !user.Deleted {
+				svc.UserCache[user.ID] = user.Name
+			}
 		}
 	}
 
 	// Get name of current user, and set presence to active
-	currentUser, err := svc.Client.GetUserInfo(svc.CurrentUserID)
+	currentUsername, err := svc.GetUserName(svc.CurrentUserID)
 	if err != nil {
 		svc.CurrentUsername = "slack-term"
 	}
-	svc.CurrentUsername = currentUser.Name
+	svc.CurrentUsername = currentUsername
 	svc.SetUserAsActive()
 
 	return svc, nil
 }
 
-func (s *SlackService) GetChannels() ([]components.ChannelItem, error) {
+func (s *SlackService) GetUserName(userID string) (string, error) {
+	if user, ok := s.UserCache[userID]; ok {
+		return user, nil
+	}
+
+	user, err := s.Client.GetUserInfo(userID)
+	if err == nil {
+		s.UserCache[user.ID] = user.Name
+		return user.Name, nil
+	}
+
+	// If error, return user ID
+	placeholderName := fmt.Sprintf("unknown (%s)", userID)
+	s.UserCache[userID] = placeholderName
+	return placeholderName, err
+}
+
+func (s *SlackService) GetBotName(botID string) (string, error) {
+	if user, ok := s.UserCache[botID]; ok {
+		return user, nil
+	}
+
+	user, err := s.Client.GetUserInfo(botID)
+	if err == nil {
+		name := fmt.Sprintf("%s (bot)", user.Name)
+		s.UserCache[user.ID] = name
+		return name, nil
+	}
+
+	// If error, return user ID
+	placeholderName := fmt.Sprintf("unknown bot (%s)", botID)
+	s.UserCache[botID] = placeholderName
+	return placeholderName, err
+}
+
+func (s *SlackService) GetConversationsForUser() ([]components.ChannelItem, error) {
 	slackChans := make([]slack.Channel, 0)
+	convTypes := []string{
+		"public_channel",
+		"private_channel",
+		"im",
+		"mpim",
+	}
+
+	slackChans, _, err := s.Client.GetConversationsForUser(
+		&slack.GetConversationsForUserParameters{
+		Limit:           1000,
+		Types:           convTypes,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var chans []components.ChannelItem
+	s.Conversations, chans = s.getSortedChannels(slackChans, false)
+	return chans, nil
+}
+
+// Note: includePublic=true will be SLOW for organizations with a large number of public channels!
+func (s *SlackService) GetChannels(includePublic bool) ([]components.ChannelItem, error) {
+	slackChans := make([]slack.Channel, 0)
+	convTypes := []string{
+		"private_channel",
+		"im",
+		"mpim",
+	}
+
+	if includePublic {
+		convTypes = append([]string{"public_channel"}, convTypes...)
+	}
 
 	// Initial request
-	initChans, initCur, err := s.Client.GetConversations(
-		&slack.GetConversationsParameters{
-			ExcludeArchived: "true",
-			Limit:           1000,
-			Types: []string{
-				"public_channel",
-				"private_channel",
-				"im",
-				"mpim",
-			},
-		},
-	)
+	params := &slack.GetConversationsParameters{
+		ExcludeArchived: "true",
+		Limit:           1000,
+		Types:           convTypes,
+	}
+	initChans, initCur, err := s.Client.GetConversations(params)
 	if err != nil {
 		return nil, err
 	}
@@ -124,19 +189,8 @@ func (s *SlackService) GetChannels() ([]components.ChannelItem, error) {
 	// Paginate over additional channels
 	nextCur := initCur
 	for nextCur != "" {
-		channels, cursor, err := s.Client.GetConversations(
-			&slack.GetConversationsParameters{
-				Cursor:          nextCur,
-				ExcludeArchived: "true",
-				Limit:           1000,
-				Types: []string{
-					"public_channel",
-					"private_channel",
-					"im",
-					"mpim",
-				},
-			},
-		)
+		params.Cursor = nextCur
+		channels, cursor, err := s.Client.GetConversations(params)
 		if err != nil {
 			return nil, err
 		}
@@ -145,112 +199,130 @@ func (s *SlackService) GetChannels() ([]components.ChannelItem, error) {
 		nextCur = cursor
 	}
 
-	// We're creating tempChan, because we want to be able to
-	// sort the types of channels into buckets
-	type tempChan struct {
-		channelItem  components.ChannelItem
-		slackChannel slack.Channel
+	// Return sorted conversations 
+	var chans []components.ChannelItem
+	s.Conversations, chans = s.getSortedChannels(slackChans, true)
+	return chans, nil
+}
+
+// We're creating tempChan, because we want to be able to
+// sort the types of channels into buckets
+type tempChan struct {
+	channelItem  components.ChannelItem
+	slackChannel slack.Channel
+}
+
+type bucket map[string]*tempChan
+
+func makeBuckets() map[int]bucket  {
+	// Initialize buckets
+	buckets := make(map[int]bucket)
+	buckets[0] = make(bucket) // Channels
+	buckets[1] = make(bucket) // Group
+	buckets[2] = make(bucket) // MpIM
+	buckets[3] = make(bucket) // IM
+	return buckets
+}
+
+func (s *SlackService) sortIntoBuckets(buckets map[int]bucket, chn slack.Channel, keepOnlyIsMember bool) {
+	chanItem := s.createChannelItem(chn)
+	if chn.IsChannel {
+		if keepOnlyIsMember && !chn.IsMember {
+			return
+		}
+
+		chanItem.Type = components.ChannelTypeChannel
+
+		if chn.UnreadCount > 0 {
+			chanItem.Notification = true
+		}
+
+		buckets[0][chn.ID] = &tempChan{
+			channelItem:  chanItem,
+			slackChannel: chn,
+		}
 	}
 
-	// Initialize buckets
-	buckets := make(map[int]map[string]*tempChan)
-	buckets[0] = make(map[string]*tempChan) // Channels
-	buckets[1] = make(map[string]*tempChan) // Group
-	buckets[2] = make(map[string]*tempChan) // MpIM
-	buckets[3] = make(map[string]*tempChan) // IM
+	if chn.IsGroup {
+		if keepOnlyIsMember && !chn.IsMember {
+			return
+		}
+
+		// This is done because MpIM channels are also considered groups
+		if chn.IsMpIM {
+			if !chn.IsOpen {
+				return
+			}
+
+			chanItem.Type = components.ChannelTypeMpIM
+
+			if chn.UnreadCount > 0 {
+				chanItem.Notification = true
+			}
+
+			buckets[2][chn.ID] = &tempChan{
+				channelItem:  chanItem,
+				slackChannel: chn,
+			}
+		} else {
+
+			chanItem.Type = components.ChannelTypeGroup
+
+			if chn.UnreadCount > 0 {
+				chanItem.Notification = true
+			}
+
+			buckets[1][chn.ID] = &tempChan{
+				channelItem:  chanItem,
+				slackChannel: chn,
+			}
+		}
+	}
+
+	// NOTE: user presence is set in the event handler by the function
+	// `actionSetPresenceAll`, that is why we set the presence to away
+	if chn.IsIM {
+		// Check if user is deleted, we do this by checking the user id,
+		// and see if we have the user in the UserCache
+		name, err := s.GetUserName(chn.User)
+		if err != nil {
+			return
+		}
+
+		chanItem.Name = name
+		chanItem.Type = components.ChannelTypeIM
+		chanItem.Presence = "away"
+
+		if chn.UnreadCount > 0 {
+			chanItem.Notification = true
+		}
+
+		buckets[3][chn.User] = &tempChan{
+			channelItem:  chanItem,
+			slackChannel: chn,
+		}
+	}
+}
+
+// GetConversationsForUser will omit IsMember since it's implied the user belongs to those conversations
+func (s *SlackService) getSortedChannels(slackChans[] slack.Channel, keepOnlyIsMember bool) ([]slack.Channel, []components.ChannelItem) {
+	buckets := makeBuckets()
 
 	var wg sync.WaitGroup
 	for _, chn := range slackChans {
-		chanItem := s.createChannelItem(chn)
-
-		if chn.IsChannel {
-			if !chn.IsMember {
-				continue
-			}
-
-			chanItem.Type = components.ChannelTypeChannel
-
-			if chn.UnreadCount > 0 {
-				chanItem.Notification = true
-			}
-
-			buckets[0][chn.ID] = &tempChan{
-				channelItem:  chanItem,
-				slackChannel: chn,
-			}
-		}
-
-		if chn.IsGroup {
-			if !chn.IsMember {
-				continue
-			}
-
-			// This is done because MpIM channels are also considered groups
-			if chn.IsMpIM {
-				if !chn.IsOpen {
-					continue
-				}
-
-				chanItem.Type = components.ChannelTypeMpIM
-
-				if chn.UnreadCount > 0 {
-					chanItem.Notification = true
-				}
-
-				buckets[2][chn.ID] = &tempChan{
-					channelItem:  chanItem,
-					slackChannel: chn,
-				}
-			} else {
-
-				chanItem.Type = components.ChannelTypeGroup
-
-				if chn.UnreadCount > 0 {
-					chanItem.Notification = true
-				}
-
-				buckets[1][chn.ID] = &tempChan{
-					channelItem:  chanItem,
-					slackChannel: chn,
-				}
-			}
-		}
-
-		// NOTE: user presence is set in the event handler by the function
-		// `actionSetPresenceAll`, that is why we set the presence to away
-		if chn.IsIM {
-			// Check if user is deleted, we do this by checking the user id,
-			// and see if we have the user in the UserCache
-			name, ok := s.UserCache[chn.User]
-			if !ok {
-				continue
-			}
-
-			chanItem.Name = name
-			chanItem.Type = components.ChannelTypeIM
-			chanItem.Presence = "away"
-
-			if chn.UnreadCount > 0 {
-				chanItem.Notification = true
-			}
-
-			buckets[3][chn.User] = &tempChan{
-				channelItem:  chanItem,
-				slackChannel: chn,
-			}
-		}
+		s.sortIntoBuckets(buckets, chn, keepOnlyIsMember )
 	}
 
 	wg.Wait()
 
-	// Sort the buckets
 	var keys []int
 	for k := range buckets {
 		keys = append(keys, k)
 	}
 	sort.Ints(keys)
 
-	var chans []components.ChannelItem
+	var slackChannels []slack.Channel
+	var channelItems []components.ChannelItem
 	for _, k := range keys {
 
 		bucket := buckets[k]
@@ -267,13 +339,14 @@ func (s *SlackService) GetChannels() ([]components.ChannelItem, error) {
 
 		// Add ChannelItem and SlackChannel to the SlackService struct
 		for _, tc := range tcArr {
-			chans = append(chans, tc.channelItem)
-			s.Conversations = append(s.Conversations, tc.slackChannel)
+			channelItems = append(channelItems, tc.channelItem)
+			slackChannels = append(slackChannels, tc.slackChannel)
 		}
 	}
 
-	return chans, nil
+	return slackChannels, channelItems
 }
+
 
 // GetUserPresence will get the presence of a specific user
 func (s *SlackService) GetUserPresence(userID string) (string, error) {
@@ -516,38 +589,10 @@ func (s *SlackService) CreateMessage(message slack.Message, channelID string) co
 	var name string
 
 	// Get username from cache
-	name, ok := s.UserCache[message.User]
-
-	// Name not in cache
-	if !ok {
-		if message.BotID != "" {
-			name, ok = s.UserCache[message.BotID]
-			if !ok {
-				if message.Username != "" {
-					name = message.Username
-					s.UserCache[message.BotID] = message.Username
-				} else {
-					bot, err := s.Client.GetBotInfo(message.BotID)
-					if err != nil {
-						name = "unkown"
-						s.UserCache[message.BotID] = name
-					} else {
-						name = bot.Name
-						s.UserCache[message.BotID] = bot.Name
-					}
-				}
-			}
-		} else {
-			// Not a bot, not in cache, get user info
-			user, err := s.Client.GetUserInfo(message.User)
-			if err != nil {
-				name = "unknown"
-				s.UserCache[message.User] = name
-			} else {
-				name = user.Name
-				s.UserCache[message.User] = user.Name
-			}
-		}
+	if message.BotID != "" {
+		name, _ = s.GetBotName(message.BotID)
+	} else {
+		name, _ = s.GetUserName(message.User)
 	}
 
 	if name == "" {
@@ -833,22 +878,7 @@ func parseMentions(s *SlackService, msg string) string {
 				userID = rs[1]
 			}
 
-			name, ok := s.UserCache[userID]
-			if !ok {
-				user, err := s.Client.GetUserInfo(userID)
-				if err != nil {
-					name = "unknown"
-					s.UserCache[userID] = name
-				} else {
-					name = user.Name
-					s.UserCache[userID] = user.Name
-				}
-			}
-
-			if name == "" {
-				name = "unknown"
-			}
-
+			name, _ := s.GetUserName(userID)
 			return "@" + name
 		},
 	)

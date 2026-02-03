@@ -1,6 +1,7 @@
 package views
 
 import (
+	"fmt"
 	"github.com/erroneousboat/termui"
 
 	"github.com/erroneousboat/slack-term/components"
@@ -27,13 +28,26 @@ func CreateView(config *config.Config, svc *service.SlackService) (*View, error)
 	channels := components.CreateChannelsComponent(sideBarHeight)
 
 	// Channels: fill the component
-	slackChans, err := svc.GetChannels()
+	var slackChans []components.ChannelItem
+	var err error
+	if config.IsEnterprise {
+		slackChans, err = svc.GetConversationsForUser()
+	} else {
+		slackChans, err = svc.GetChannels(true)
+	}
+
 	if err != nil {
 		return nil, err
 	}
 
 	// Channels: set channels in component
 	channels.SetChannels(slackChans)
+
+	if len(channels.ChannelItems) == 0 {
+		return nil, fmt.Errorf("no channels available")
+	}
+
+	selectedChannel := channels.GetSelectedChannel()
 
 	// Threads: create component
 	threads := components.CreateThreadsComponent(sideBarHeight)
@@ -43,7 +57,7 @@ func CreateView(config *config.Config, svc *service.SlackService) (*View, error)
 
 	// Chat: fill the component
 	msgs, thr, err := svc.GetMessages(
-		channels.ChannelItems[channels.SelectedChannel].ID,
+		selectedChannel.ID,
 		chat.GetMaxItems(),
 	)
 	if err != nil {
@@ -54,7 +68,7 @@ func CreateView(config *config.Config, svc *service.SlackService) (*View, error)
 	chat.SetMessages(msgs)
 
 	chat.SetBorderLabel(
-		channels.ChannelItems[channels.SelectedChannel].GetChannelName(),
+		selectedChannel.GetChannelName(),
 	)
 
 	// Threads: set threads in component

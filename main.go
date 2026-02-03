@@ -9,6 +9,7 @@ import (
 	"github.com/OpenPeeDeeP/xdg"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/slack-go/slack"
 
 	"github.com/erroneousboat/slack-term/components"
 	"github.com/erroneousboat/slack-term/config"
@@ -100,6 +101,7 @@ func initialModel() (model, error) {
 func (m model) Init() tea.Cmd {
 	return tea.Batch(
 		loadChannelsCmd(m.ctx),
+		listenRTMCmd(m.ctx),
 	)
 }
 
@@ -235,6 +237,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			debugPrintf("messagesLoadedMsg: Buffered messages (not ready yet)")
 		}
 
+	case rtmEventMsg:
+		// Handle RTM events and continue listening
+		cmd := m.handleRTMEvent(msg.event)
+		return m, tea.Batch(cmd, listenRTMCmd(m.ctx))
+
 	case errMsg:
 		m.err = msg.err
 	}
@@ -320,6 +327,10 @@ type messagesLoadedMsg struct {
 	content string
 }
 
+type rtmEventMsg struct {
+	event interface{}
+}
+
 type errMsg struct {
 	err error
 }
@@ -361,6 +372,40 @@ func loadMessagesCmd(ctx *context.AppContext, channelID string) tea.Cmd {
 
 		return messagesLoadedMsg{content: content}
 	}
+}
+
+func listenRTMCmd(ctx *context.AppContext) tea.Cmd {
+	return func() tea.Msg {
+		// Wait for next RTM event
+		rtmEvent := <-ctx.Service.RTM.IncomingEvents
+		return rtmEventMsg{event: rtmEvent.Data}
+	}
+}
+
+func (m *model) handleRTMEvent(event interface{}) tea.Cmd {
+	switch ev := event.(type) {
+	case *slack.MessageEvent:
+		debugPrintf("RTM: Message event in channel %s", ev.Channel)
+		
+		// If it's for the current channel, reload messages
+		if m.channels.SelectedChannel() != nil && ev.Channel == m.channels.SelectedChannel().ID {
+			return loadMessagesCmd(m.ctx, ev.Channel)
+		}
+		
+		// TODO: Mark channel as having unread messages
+		
+	case *slack.PresenceChangeEvent:
+		debugPrintf("RTM: Presence change for user %s: %s", ev.User, ev.Presence)
+		// TODO: Update user presence in channels list
+		
+	case *slack.RTMError:
+		debugPrintf("RTM: Error: %v", ev.Error())
+		if m.debug != nil {
+			m.debug.Println(fmt.Sprintf("RTM Error: %v", ev.Error()))
+		}
+	}
+	
+	return nil
 }
 
 func main() {

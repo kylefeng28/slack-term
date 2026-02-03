@@ -53,6 +53,35 @@ func initialModel() (model, error) {
 		return model{}, err
 	}
 
+	/*
+	// Load config
+	config, err := config.NewConfig(flgConfig)
+	if err != nil {
+		return model{}, err
+	}
+
+	// Override with command line flags if provided
+	if flgToken != "" {
+		config.SlackToken = flgToken
+	}
+	if flgCookie != "" {
+		config.SlackCookie = flgCookie
+	}
+
+	// Create Service only (skip view creation)
+	svc, err := service.NewSlackService(config)
+	if err != nil {
+		return model{}, err
+	}
+
+	// Create minimal context without termui
+	ctx := &context.AppContext{
+		Service: svc,
+		Config:  config,
+		Debug:   flgDebug,
+	}
+	*/
+
 	ti := textinput.New()
 	ti.Placeholder = "Type a message..."
 	ti.Focus()

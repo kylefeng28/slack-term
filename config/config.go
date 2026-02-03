@@ -21,6 +21,7 @@ const (
 type Config struct {
 	SlackToken   string                `json:"slack_token"`
 	SlackCookie  string                `json:"slack_cookie"`
+	SlackApiUrl  string                `json:"slack_api_url"`
 	Notify       string                `json:"notify"`
 	Emoji        bool                  `json:"emoji"`
 	SidebarWidth int                   `json:"sidebar_width"`

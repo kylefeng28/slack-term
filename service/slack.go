@@ -43,13 +43,24 @@ func (t *cookieTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 // NewSlackService is the constructor for the SlackService and will initialize
 // the RTM and a Client
 func NewSlackService(config *config.Config) (*SlackService, error) {
-	httpClient := &http.Client{
-		Transport: &cookieTransport{cookie: config.SlackCookie},
+	var args []slack.Option
+
+	if config.SlackCookie != "" {
+		httpClient := &http.Client{
+			Transport: &cookieTransport{cookie: config.SlackCookie},
+		}
+		args = append(args, slack.OptionHTTPClient(httpClient))
 	}
+
+	if config.SlackApiUrl != "" {
+		args = append(args, slack.OptionAPIURL(config.SlackApiUrl))
+	}
+
+	slackClient := slack.New(config.SlackToken, args...)
 
 	svc := &SlackService{
 		Config:      config,
-		Client:      slack.New(config.SlackToken, slack.OptionHTTPClient(httpClient)),
+		Client:      slackClient,
 		UserCache:   make(map[string]string),
 		ThreadCache: make(map[string]string),
 	}

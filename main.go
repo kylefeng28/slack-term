@@ -32,6 +32,7 @@ GLOBAL OPTIONS:
    -config [path-to-config-file]
    -token [slack-token]
    -cookie [slack-cookie]
+   -api-url [slack-api-url]
    -debug
    -help, -h
 `
@@ -41,6 +42,7 @@ var (
 	flgConfig string
 	flgToken  string
 	flgCookie string
+	flgApiUrl string
 	flgDebug  bool
 	flgUsage  bool
 )
@@ -70,6 +72,13 @@ func init() {
 		"cookie",
 		"",
 		"the slack cookie",
+	)
+
+	flag.StringVar(
+		&flgApiUrl,
+		"apiUrl",
+		"",
+		"the slack API URL",
 	)
 
 	flag.BoolVar(
@@ -106,7 +115,7 @@ func main() {
 	// Create context
 	usage := fmt.Sprintf(USAGE, VERSION)
 	ctx, err := context.CreateAppContext(
-		flgConfig, flgToken, flgCookie, flgDebug, VERSION, usage,
+		flgConfig, flgToken, flgCookie, flgApiUrl, flgDebug, VERSION, usage,
 	)
 	if err != nil {
 		termbox.Close()

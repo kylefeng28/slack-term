@@ -17,6 +17,9 @@ const (
 	IconIM           = "●"
 	IconMpIM         = "☰"
 	IconNotification = "*"
+
+  PresenceAway   = "away"
+  PresenceActive = "active"
 )
 
 type Channels struct {
@@ -34,11 +37,10 @@ type ChannelItem struct {
 	ID           string
 	Name         string
 	Topic        string
+	Type         string
 	UserID       string
 	Presence     string
 	Notification bool
-	Type         string
-	Unread       int
 	StylePrefix  string
 	StyleIcon    string
 	StyleText    string
@@ -55,31 +57,12 @@ func (d channelDelegate) Height() int                               { return 1 }
 func (d channelDelegate) Spacing() int                              { return 0 }
 func (d channelDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd { return nil }
 func (d channelDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
-	ch, ok := item.(ChannelItem)
+	c, ok := item.(ChannelItem)
 	if !ok {
 		return
 	}
 
-	// Get icon based on type
-	icon := IconChannel
-	switch ch.Type {
-	case ChannelTypeGroup:
-		icon = IconGroup
-	case ChannelTypeIM:
-		if ch.Presence == "active" {
-			icon = IconOnline
-		} else {
-			icon = IconOffline
-		}
-	case ChannelTypeMpIM:
-		icon = IconMpIM
-	}
-
-	// Notification indicator
-	notification := " "
-	if ch.Notification {
-		notification = IconNotification
-	}
+	channelName := c.ToString()
 
 	// Style based on selection
 	var style lipgloss.Style
@@ -89,9 +72,47 @@ func (d channelDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		style = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	}
 
-	// Format: [*] # channel-name
-	line := fmt.Sprintf("[%s] %s %s", notification, icon, ch.Name)
-	fmt.Fprint(w, style.Render(line))
+	fmt.Fprint(w, style.Render(channelName))
+}
+
+// ToString will set the label of the channel, how it will be
+// displayed on screen. Based on the type, different icons are
+// shown, as well as an optional notification icon.
+func (c ChannelItem) ToString() string {
+	var prefix string
+	if c.Notification {
+		prefix = IconNotification
+	} else {
+		prefix = " "
+	}
+
+	var icon string
+	switch c.Type {
+	case ChannelTypeChannel:
+		icon = IconChannel
+	case ChannelTypeGroup:
+		icon = IconGroup
+	case ChannelTypeMpIM:
+		icon = IconMpIM
+	case ChannelTypeIM:
+		switch c.Presence {
+		case PresenceActive:
+			icon = IconOnline
+		case PresenceAway:
+			icon = IconOffline
+		default:
+			icon = IconIM
+		}
+	}
+
+	label := fmt.Sprintf(
+		"[%s](%s) [%s](%s) [%s](%s)",
+		prefix, c.StylePrefix,
+		icon, c.StyleIcon,
+		c.Name, c.StyleText,
+	)
+
+	return label
 }
 
 func NewChannels(width, height int) *Channels {

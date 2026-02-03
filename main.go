@@ -35,23 +35,34 @@ func init() {
 }
 
 type model struct {
-	ctx            *context.AppContext
-	channels       *components.Channels
-	chat           *components.Chat
-	input          *components.Input
-	mode           *components.Mode
-	ready          bool
-	width          int
-	height         int
-	err            error
+	ctx             *context.AppContext
+	channels        *components.Channels
+	chat            *components.Chat
+	threads         *components.Threads
+	debug           *components.Debug
+	input           *components.Input
+	mode            *components.Mode
+	ready           bool
+	width           int
+	height          int
+	err             error
 	pendingChannels []components.ChannelItem
 	pendingMessages string
+	showThreads     bool
+	showDebug       bool
 }
 
 func debugPrintf(format string, args ...any) {
 	if flgDebug {
-		fmt.Printf(format, args...)
+		log.Printf(format, args...)
 	}
+}
+
+func (m *model) debugLog(format string, args ...any) {
+	if m.debug != nil {
+		m.debug.Println(fmt.Sprintf(format, args...))
+	}
+	debugPrintf(format, args...)
 }
 
 func initialModel() (model, error) {
@@ -79,9 +90,10 @@ func initialModel() (model, error) {
 	}
 
 	return model{
-		ctx:   ctx,
-		input: components.NewInput(),
-		mode:  components.NewMode(),
+		ctx:       ctx,
+		input:     components.NewInput(),
+		mode:      components.NewMode(),
+		showDebug: flgDebug,
 	}, nil
 }
 
@@ -130,6 +142,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "i":
 				m.mode.Set(components.InsertMode)
 				m.input.Focus()
+			case "d":
+				// Toggle debug pane and trigger resize
+				m.showDebug = !m.showDebug
+				return m, func() tea.Msg {
+					return tea.WindowSizeMsg{Width: m.width, Height: m.height}
+				}
 			case "enter":
 				if ch := m.channels.SelectedChannel(); ch != nil {
 					return m, loadMessagesCmd(m.ctx, ch.ID)
@@ -150,12 +168,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		
 		sidebarWidth := m.width / 3
+		contentHeight := m.height - 2
+		
+		// Calculate widths based on what's shown
 		chatWidth := m.width - sidebarWidth
-		contentHeight := m.height - 2 // Reserve space for input and mode
+		threadsWidth := 0
+		debugWidth := 0
+		
+		if m.showThreads {
+			threadsWidth = m.width / 4
+			chatWidth -= threadsWidth
+		}
+		if m.showDebug {
+			debugWidth = 20
+			chatWidth -= debugWidth
+		}
 
 		if !m.ready {
 			m.channels = components.NewChannels(sidebarWidth, contentHeight)
 			m.chat = components.NewChat(chatWidth, contentHeight)
+			if m.showThreads {
+				m.threads = components.NewThreads(threadsWidth, contentHeight)
+			}
+			if m.showDebug {
+				m.debug = components.NewDebug(debugWidth, contentHeight)
+			}
 			m.ready = true
 			
 			// Apply pending data
@@ -170,6 +207,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.channels.SetSize(sidebarWidth, contentHeight)
 			m.chat.SetSize(chatWidth, contentHeight)
+			if m.threads != nil {
+				m.threads.SetSize(threadsWidth, contentHeight)
+			}
+			if m.debug != nil {
+				m.debug.SetSize(debugWidth, contentHeight)
+			}
 		}
 
 	case channelsLoadedMsg:
@@ -204,22 +247,59 @@ func (m model) View() string {
 		return "Loading..."
 	}
 
-	// Layout
+	// Build main view with channels, chat, and optional threads/debug
+	views := []string{}
+	
+	// Channels (left sidebar)
+	sidebarWidth := m.width / 3
 	channelsView := lipgloss.NewStyle().
-		Width(m.width / 3).
+		Width(sidebarWidth).
 		Height(m.height - 2).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("240")).
 		Render(m.channels.View())
+	views = append(views, channelsView)
 
+	// Chat (main area)
+	chatWidth := m.width - sidebarWidth
+	if m.showThreads {
+		chatWidth -= m.width / 4
+	}
+	if m.showDebug {
+		chatWidth -= 20
+	}
+	
 	chatView := lipgloss.NewStyle().
-		Width(m.width - m.width/3).
+		Width(chatWidth).
 		Height(m.height - 2).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("240")).
 		Render(m.chat.View())
+	views = append(views, chatView)
 
-	mainView := lipgloss.JoinHorizontal(lipgloss.Top, channelsView, chatView)
+	// Threads (optional)
+	if m.showThreads && m.threads != nil {
+		threadsView := lipgloss.NewStyle().
+			Width(m.width / 4).
+			Height(m.height - 2).
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("240")).
+			Render(m.threads.View())
+		views = append(views, threadsView)
+	}
+
+	// Debug (optional)
+	if m.showDebug && m.debug != nil {
+		debugView := lipgloss.NewStyle().
+			Width(20).
+			Height(m.height - 2).
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("240")).
+			Render(m.debug.View())
+		views = append(views, debugView)
+	}
+
+	mainView := lipgloss.JoinHorizontal(lipgloss.Top, views...)
 
 	statusBar := lipgloss.JoinHorizontal(
 		lipgloss.Left,
@@ -271,7 +351,7 @@ func loadMessagesCmd(ctx *context.AppContext, channelID string) tea.Cmd {
 		debugPrintf("loadMessagesCmd: Loaded %d messages", len(messages))
 		
 		content := ""
-		for i := len(messages) - 1; i >= 0; i-- {
+		for i := 0; i < len(messages); i++ {
 			msg := messages[i]
 			content += fmt.Sprintf("%s %s: %s\n",
 				msg.Time.Format("15:04"),

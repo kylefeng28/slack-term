@@ -35,15 +35,17 @@ func init() {
 }
 
 type model struct {
-	ctx      *context.AppContext
-	channels *components.Channels
-	chat     *components.Chat
-	input    *components.Input
-	mode     *components.Mode
-	ready    bool
-	width    int
-	height   int
-	err      error
+	ctx            *context.AppContext
+	channels       *components.Channels
+	chat           *components.Chat
+	input          *components.Input
+	mode           *components.Mode
+	ready          bool
+	width          int
+	height         int
+	err            error
+	pendingChannels []components.ChannelItem
+	pendingMessages string
 }
 
 func initialModel() (model, error) {
@@ -139,6 +141,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.channels = components.NewChannels(sidebarWidth, contentHeight)
 			m.chat = components.NewChat(chatWidth, contentHeight)
 			m.ready = true
+			
+			// Apply pending data
+			if len(m.pendingChannels) > 0 {
+				m.channels.SetChannels(m.pendingChannels)
+				m.pendingChannels = nil
+			}
+			if m.pendingMessages != "" {
+				m.chat.SetMessages(m.pendingMessages)
+				m.pendingMessages = ""
+			}
 		} else {
 			m.channels.SetSize(sidebarWidth, contentHeight)
 			m.chat.SetSize(chatWidth, contentHeight)
@@ -152,10 +164,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Name: ch.Name,
 			}
 		}
-		m.channels.SetChannels(items)
+		if m.ready {
+			m.channels.SetChannels(items)
+		} else {
+			m.pendingChannels = items
+		}
 
 	case messagesLoadedMsg:
-		m.chat.SetMessages(msg.content)
+		if m.ready {
+			m.chat.SetMessages(msg.content)
+		} else {
+			m.pendingMessages = msg.content
+		}
 
 	case errMsg:
 		m.err = msg.err

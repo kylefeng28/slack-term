@@ -40,7 +40,7 @@ type AppContext struct {
 
 // CreateAppContext creates an application context which can be passed
 // and referenced througout the application
-func CreateAppContext(flgConfig string, flgToken string, flgDebug bool, version string, usage string) (*AppContext, error) {
+func CreateAppContext(flgConfig string, flgToken string, flgCookie string, flgDebug bool, version string, usage string) (*AppContext, error) {
 	if flgDebug {
 		go func() {
 			http.ListenAndServe(":6060", nil)
@@ -63,6 +63,14 @@ func CreateAppContext(flgConfig string, flgToken string, flgDebug bool, version 
 			config.SlackToken = flgToken
 		} else {
 			config.SlackToken = os.Getenv("SLACK_TOKEN")
+		}
+	}
+
+	if config.SlackCookie == "" {
+		if flgCookie != "" {
+			config.SlackCookie = flgCookie
+		} else {
+			config.SlackCookie = os.Getenv("SLACK_COOKIE")
 		}
 	}
 

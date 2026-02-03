@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html"
 	"log"
+	"net/http"
 	"net/url"
 	"regexp"
 	"sort"
@@ -30,12 +31,25 @@ type SlackService struct {
 	CurrentUsername string
 }
 
+type cookieTransport struct {
+	cookie string
+}
+
+func (t *cookieTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req.Header.Set("Cookie", t.cookie)
+	return http.DefaultTransport.RoundTrip(req)
+}
+
 // NewSlackService is the constructor for the SlackService and will initialize
 // the RTM and a Client
 func NewSlackService(config *config.Config) (*SlackService, error) {
+	httpClient := &http.Client{
+		Transport: &cookieTransport{cookie: config.SlackCookie},
+	}
+
 	svc := &SlackService{
 		Config:      config,
-		Client:      slack.New(config.SlackToken),
+		Client:      slack.New(config.SlackToken, slack.OptionHTTPClient(httpClient)),
 		UserCache:   make(map[string]string),
 		ThreadCache: make(map[string]string),
 	}

@@ -41,7 +41,14 @@ docker run -it -v [config-file]:/config erroneousboat/slack-term
 Setup
 -----
 
-1. Get a slack token, click [here](https://github.com/erroneousboat/slack-term/wiki#running-slack-term-without-legacy-tokens)
+1. Get your Slack token and cookies from Chrome:
+  - Go to [Slack customization page](https://my.slack.com/customize)
+  - Open Chrome DevTools (F12)
+  - Go to the console and type in `window.prompt("your api token is: ", TS.boot_data.api_token)` (will start with `xoxc-...`)
+    - This will be the `slack_token` value
+  - Go to Application tab -> Cookies
+  - Copy the `d` cookie value (starts with `xoxd-`) as well as the `d-s` and `lc` cookie values
+    - These will be used for the `slack_cookie` value
 
 2. Running `slack-term` for the first time, will create a default config file at
    `~/.config/slack-term/config`.
@@ -55,7 +62,8 @@ $ slack-term
 
 ```javascript
 {
-    "slack_token": "yourslacktokenhere"
+    "slack_token": "xoxc-...",
+    "slack_cookie": "d=xoxd-...; d-s=...; lc=..."
 }
 ```
 

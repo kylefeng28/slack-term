@@ -40,6 +40,9 @@ type ChannelItem struct {
 	StyleText   string
 }
 
+// FilterValue() mplements interface for bubbletea list.Item
+func (c ChannelItem) FilterValue() string { return c.Name }
+
 // ToString will set the label of the channel, how it will be
 // displayed on screen. Based on the type, different icons are
 // shown, as well as an optional notification icon.

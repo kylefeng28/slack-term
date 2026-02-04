@@ -95,7 +95,7 @@ func init() {
 	flag.Parse()
 }
 
-func main() {
+func main_() {
 	// Start terminal user interface
 	err := termui.Init()
 	if err != nil {

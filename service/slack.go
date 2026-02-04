@@ -26,7 +26,9 @@ type SlackService struct {
 	RTM             *slack.RTM
 	Conversations   []slack.Channel
 	UserCache       map[string]string
+	PersistentCache *UserCache
 	ThreadCache     map[string]string
+	RateLimiter     *RateLimiter
 	CurrentUserID   string
 	CurrentUsername string
 }
@@ -58,11 +60,22 @@ func NewSlackService(config *config.Config) (*SlackService, error) {
 
 	slackClient := slack.New(config.SlackToken, args...)
 
+	// Initialize persistent cache
+	persistentCache, err := NewUserCache()
+	if err != nil {
+		log.Printf("Warning: couldn't initialize persistent cache: %v", err)
+	}
+
+	// Initialize rate limiter: 1 request per second (Slack Tier 3 = ~1/sec)
+	rateLimiter := NewRateLimiter(20, time.Second)
+
 	svc := &SlackService{
-		Config:      config,
-		Client:      slackClient,
-		UserCache:   make(map[string]string),
-		ThreadCache: make(map[string]string),
+		Config:          config,
+		Client:          slackClient,
+		UserCache:       make(map[string]string),
+		PersistentCache: persistentCache,
+		ThreadCache:     make(map[string]string),
+		RateLimiter:     rateLimiter,
 	}
 
 	// Get user associated with token, mainly
@@ -80,16 +93,16 @@ func NewSlackService(config *config.Config) (*SlackService, error) {
 
 	// Creation of user cache this speeds up
 	// the uncovering of usernames of messages
-	// Note: this is will hit rate limits on Slack orgs with a large number of users
-	if !config.IsEnterprise {
-		users, _ := svc.Client.GetUsers()
-		for _, user := range users {
-			// only add non-deleted users
-			if !user.Deleted {
-				svc.UserCache[user.ID] = user.Name
-			}
-		}
-	}
+	// Note: Disabled bulk user fetch to avoid rate limits
+	// Users are now fetched on-demand and cached persistently
+	// if !config.IsEnterprise {
+	// 	users, _ := svc.Client.GetUsers()
+	// 	for _, user := range users {
+	// 		if !user.Deleted {
+	// 			svc.UserCache[user.ID] = user.Name
+	// 		}
+	// 	}
+	// }
 
 	// Get name of current user, and set presence to active
 	currentUsername, err := svc.GetUserName(svc.CurrentUserID)
@@ -103,13 +116,30 @@ func NewSlackService(config *config.Config) (*SlackService, error) {
 }
 
 func (s *SlackService) GetUserName(userID string) (string, error) {
+	// Check memory cache first
 	if user, ok := s.UserCache[userID]; ok {
 		return user, nil
+	}
+
+	// Check persistent cache
+	if s.PersistentCache != nil {
+		if user, ok := s.PersistentCache.Get(userID); ok {
+			s.UserCache[userID] = user
+			return user, nil
+		}
+	}
+
+	// Rate limit API call
+	if s.RateLimiter != nil {
+		s.RateLimiter.Wait()
 	}
 
 	user, err := s.Client.GetUserInfo(userID)
 	if err == nil {
 		s.UserCache[user.ID] = user.Name
+		if s.PersistentCache != nil {
+			s.PersistentCache.Set(user.ID, user.Name)
+		}
 		return user.Name, nil
 	}
 
@@ -119,25 +149,12 @@ func (s *SlackService) GetUserName(userID string) (string, error) {
 	return placeholderName, err
 }
 
-func (s *SlackService) GetBotName(botID string) (string, error) {
-	if user, ok := s.UserCache[botID]; ok {
-		return user, nil
-	}
-
-	user, err := s.Client.GetUserInfo(botID)
-	if err == nil {
-		name := fmt.Sprintf("%s (bot)", user.Name)
-		s.UserCache[user.ID] = name
-		return name, nil
-	}
-
-	// If error, return user ID
-	placeholderName := fmt.Sprintf("unknown bot (%s)", botID)
-	s.UserCache[botID] = placeholderName
-	return placeholderName, err
-}
-
 func (s *SlackService) GetConversationsForUser() ([]components.ChannelItem, error) {
+	// Rate limit
+	if s.RateLimiter != nil {
+		s.RateLimiter.Wait()
+	}
+
 	slackChans := make([]slack.Channel, 0)
 	convTypes := []string{
 		"public_channel",
@@ -506,13 +523,21 @@ func (s *SlackService) SendCommand(channelID string, message string) (bool, erro
 // GetMessages will get messages for a channel, group or im channel delimited
 // by a count. It will return the messages, the thread identifiers
 // (as ChannelItem), and and error.
-func (s *SlackService) GetMessages(channelID string, count int) ([]components.Message, []components.ChannelItem, error) {
+// By default, only fetches messages from the last {daysToFetch} days to reduce API load.
+func (s *SlackService) GetMessages(channelID string, count int, daysToFetch int) ([]components.Message, []components.ChannelItem, error) {
+	// Rate limit
+	if s.RateLimiter != nil {
+		s.RateLimiter.Wait()
+	}
+
+	oldest := time.Now().AddDate(0, 0, -daysToFetch).Unix()
 
 	// https://godoc.org/github.com/nlopes/slack#GetConversationHistoryParameters
 	historyParams := slack.GetConversationHistoryParameters{
 		ChannelID: channelID,
 		Limit:     count,
 		Inclusive: false,
+		Oldest:    fmt.Sprintf("%d", oldest),
 	}
 
 	history, err := s.Client.GetConversationHistory(&historyParams)
@@ -589,14 +614,14 @@ func (s *SlackService) CreateMessage(message slack.Message, channelID string) co
 	var name string
 
 	// Get username from cache
-	if message.BotID != "" {
-		name, _ = s.GetBotName(message.BotID)
-	} else {
-		name, _ = s.GetUserName(message.User)
-	}
+	name, err := s.GetUserName(message.User)
 
-	if name == "" {
-		name = "unknown"
+	if err != nil && name == "" {
+		if message.BotID != "" {
+			name = "unknown bot"
+		} else {
+			name = "unknown"
+		}
 	}
 
 	// Parse time

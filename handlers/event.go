@@ -429,6 +429,7 @@ func actionGetMessages(ctx *context.AppContext) {
 	msgs, _, err := ctx.Service.GetMessages(
 		ctx.View.Channels.ChannelItems[ctx.View.Channels.SelectedChannel].ID,
 		ctx.View.Chat.GetMaxItems(),
+		1,
 	)
 	if err != nil {
 		termbox.Close()
@@ -515,6 +516,7 @@ func actionChangeChannel(ctx *context.AppContext) {
 	msgs, threads, err := ctx.Service.GetMessages(
 		ctx.View.Channels.ChannelItems[ctx.View.Channels.SelectedChannel].ID,
 		ctx.View.Chat.GetMaxItems(),
+		1,
 	)
 	if err != nil {
 		termbox.Close()
@@ -587,6 +589,7 @@ func actionChangeThread(ctx *context.AppContext) {
 		msgs, _, err = ctx.Service.GetMessages(
 			ctx.View.Channels.ChannelItems[ctx.View.Channels.SelectedChannel].ID,
 			ctx.View.Chat.GetMaxItems(),
+			1,
 		)
 		if err != nil {
 			termbox.Close()

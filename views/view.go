@@ -59,6 +59,7 @@ func CreateView(config *config.Config, svc *service.SlackService) (*View, error)
 	msgs, thr, err := svc.GetMessages(
 		selectedChannel.ID,
 		chat.GetMaxItems(),
+		1,
 	)
 	if err != nil {
 		return nil, err

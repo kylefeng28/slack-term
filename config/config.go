@@ -78,7 +78,7 @@ func NewConfig(filepath string) (*Config, error) {
 }
 
 func CreateConfigFile(filepath string) (*os.File, error) {
-	filepath = fmt.Sprintf("%s/slack-term/%s", xdg.ConfigHome(), "config")
+	filepath = fp.Join(xdg.ConfigHome(), "slack-term", "config")
 
 	if _, err := os.Stat(filepath); os.IsNotExist(err) {
 		os.MkdirAll(fp.Dir(filepath), os.ModePerm)

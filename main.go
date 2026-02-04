@@ -123,6 +123,11 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Cleanup persistent cache on exit
+	if ctx.Service.PersistentCache != nil {
+		defer ctx.Service.PersistentCache.Close()
+	}
+
 	// Initialize handlers
 	handlers.Initialize(ctx)
 

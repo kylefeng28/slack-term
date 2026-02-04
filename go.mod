@@ -11,6 +11,7 @@ require (
 	github.com/lithammer/fuzzysearch v1.1.0
 	github.com/maruel/panicparse v1.1.1 // indirect
 	github.com/mattn/go-runewidth v0.0.7
+	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/mitchellh/go-wordwrap v0.0.0-20150314170334-ad45545899c7 // indirect
 	github.com/nsf/termbox-go v0.0.0-20191229070316-58d4fcbce2a7
 	github.com/pkg/errors v0.9.1 // indirect

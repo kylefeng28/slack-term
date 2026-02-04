@@ -83,6 +83,8 @@ Default Key Mapping
 Below are the default key-mappings for `slack-term`, you can change them
 in your `config` file.
 
+**Note:** Channel navigation (j/k/g/G) only highlights channels. Press Enter to load the selected channel.
+
 | mode    | key       | action                     |
 |---------|-----------|----------------------------|
 | command | `i`       | insert mode                |
@@ -91,9 +93,9 @@ in your `config` file.
 | command | `j`       | move channel cursor down   |
 | command | `g`       | move channel cursor top    |
 | command | `G`       | move channel cursor bottom |
+| command | `enter`   | load selected channel      |
 | command | `K`       | thread up                  |
 | command | `J`       | thread down                |
-| command | `G`       | move channel cursor bottom |
 | command | `pg-up`   | scroll chat pane up        |
 | command | `ctrl-b`  | scroll chat pane up        |
 | command | `ctrl-u`  | scroll chat pane up        |

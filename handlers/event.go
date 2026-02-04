@@ -45,6 +45,7 @@ var actionMap = map[string]func(*context.AppContext){
 	"channel-search-next": actionSearchNextChannels,
 	"channel-search-prev": actionSearchPrevChannels,
 	"channel-jump":        actionJumpChannels,
+	"channel-select":      actionChangeChannel,
 	"thread-up":           actionMoveCursorUpThreads,
 	"thread-down":         actionMoveCursorDownThreads,
 	"chat-up":             actionScrollUpChat,
@@ -442,69 +443,43 @@ func actionGetMessages(ctx *context.AppContext) {
 	termui.Render(ctx.View.Chat)
 }
 
-// actionMoveCursorUpChannels will execute the actionChangeChannel
-// function. A timer is implemented to support fast scrolling through
-// the list without executing the actionChangeChannel event
+// actionMoveCursorUpChannels will move the channel cursor up
+// without loading the channel
 func actionMoveCursorUpChannels(ctx *context.AppContext) {
-	go func() {
-		if scrollTimer != nil {
-			scrollTimer.Stop()
-		}
-
-		ctx.View.Channels.MoveCursorUp()
-		termui.Render(ctx.View.Channels)
-
-		scrollTimer = time.NewTimer(time.Second / 4)
-		<-scrollTimer.C
-
-		// Only actually change channel when the timer expires
-		actionChangeChannel(ctx)
-	}()
+	ctx.View.Channels.MoveCursorUp()
+	termui.Render(ctx.View.Channels)
 }
 
-// actionMoveCursorDownChannels will execute the actionChangeChannel
-// function. A timer is implemented to support fast scrolling through
-// the list without executing the actionChangeChannel event
+// actionMoveCursorDownChannels will move the channel cursor down
+// without loading the channel
 func actionMoveCursorDownChannels(ctx *context.AppContext) {
-	go func() {
-		if scrollTimer != nil {
-			scrollTimer.Stop()
-		}
-
-		ctx.View.Channels.MoveCursorDown()
-		termui.Render(ctx.View.Channels)
-
-		scrollTimer = time.NewTimer(time.Second / 4)
-		<-scrollTimer.C
-
-		// Only actually change channel when the timer expires
-		actionChangeChannel(ctx)
-	}()
+	ctx.View.Channels.MoveCursorDown()
+	termui.Render(ctx.View.Channels)
 }
 
 func actionMoveCursorTopChannels(ctx *context.AppContext) {
 	ctx.View.Channels.MoveCursorTop()
-	actionChangeChannel(ctx)
+	termui.Render(ctx.View.Channels)
 }
 
 func actionMoveCursorBottomChannels(ctx *context.AppContext) {
 	ctx.View.Channels.MoveCursorBottom()
-	actionChangeChannel(ctx)
+	termui.Render(ctx.View.Channels)
 }
 
 func actionSearchNextChannels(ctx *context.AppContext) {
 	ctx.View.Channels.SearchNext()
-	actionChangeChannel(ctx)
+	termui.Render(ctx.View.Channels)
 }
 
 func actionSearchPrevChannels(ctx *context.AppContext) {
 	ctx.View.Channels.SearchPrev()
-	actionChangeChannel(ctx)
+	termui.Render(ctx.View.Channels)
 }
 
 func actionJumpChannels(ctx *context.AppContext) {
 	ctx.View.Channels.Jump()
-	actionChangeChannel(ctx)
+	termui.Render(ctx.View.Channels)
 }
 
 func actionChangeChannel(ctx *context.AppContext) {

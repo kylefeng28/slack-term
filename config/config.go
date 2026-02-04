@@ -113,6 +113,7 @@ func getDefaultConfig() Config {
 				"j":          "channel-down",
 				"g":          "channel-top",
 				"G":          "channel-bottom",
+				"<enter>":    "channel-select",
 				"K":          "thread-up",
 				"J":          "thread-down",
 				"<previous>": "chat-up",
